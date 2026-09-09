@@ -37,7 +37,7 @@ type Gate = {
 
 type Ribbon = { mesh: Mesh; speed: number };
 
-const PLAYER_TEXTURE = "/manus-storage/paper-plane-cutout_58740b21.png";
+const PLAYER_TEXTURE = "/paper-plane-cutout.png";
 const FINISH_DISTANCE = 320;
 const START_Z = 28;
 const GATE_SPACING = 27;

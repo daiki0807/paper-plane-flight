@@ -12,7 +12,7 @@
 
 | Name | Description | Size | Image |
 |------|-------------|------|-------|
-| plane_cutout | Generated white folded paper plane with blue and coral accents | 2.4m in-game display width | `/manus-storage/paper-plane-cutout_58740b21.png` |
+| plane_cutout | Generated white folded paper plane with blue and coral accents | 2.4m in-game display width | `client/public/paper-plane-cutout.png` |
 
 ## Backgrounds
 
