@@ -6,13 +6,13 @@
 
 | Name | Description | Size | Image | GLB |
 |------|-------------|------|-------|-----|
-| player_plane | Procedural camera-facing player plane using generated cutout texture | 2.4m wide | `/home/ubuntu/webdev-static-assets/paper-plane-cutout.png` | — |
+| player_plane | Procedural folded paper dart, nose on +Z, built from flat facets in `createPaperPlane` | 3.5m span | — | — |
 
 ## Textures
 
 | Name | Description | Size | Image |
 |------|-------------|------|-------|
-| plane_cutout | Generated white folded paper plane with blue and coral accents | 2.4m in-game display width | `client/public/paper-plane-cutout.png` |
+| plane_cutout | Generated white folded paper plane with blue and coral accents. No longer used in-game (the player is a real mesh); kept as the art-direction reference for the model's palette. | — | `client/public/paper-plane-cutout.png` |
 
 ## Backgrounds
 

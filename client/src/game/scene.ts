@@ -7,7 +7,7 @@ import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 
@@ -37,7 +37,6 @@ type Gate = {
 
 type Ribbon = { mesh: Mesh; speed: number };
 
-const PLAYER_TEXTURE = "/paper-plane-cutout.png";
 const FINISH_DISTANCE = 320;
 const START_Z = 28;
 const GATE_SPACING = 27;
@@ -46,6 +45,17 @@ const GRAVITY = -7.2;
 const FLAP_VELOCITY = 6.8;
 const FLIGHT_SPEED = 16.5;
 const PLANE_RADIUS = 0.78;
+const PLANE_START_Y = 4.35;
+const PLANE_SCALE = 1.85;
+// A paper dart glides slightly nose-down, and the chase camera sits almost level
+// with it, so a standing trim plus a small bank keeps the wings facing the player
+// instead of showing them edge-on.
+const PITCH_TRIM = 0.2;
+const PITCH_PER_SPEED = 0.052;
+const PITCH_UP_LIMIT = -0.24;
+const PITCH_DOWN_LIMIT = 0.3;
+const YAW_TRIM = 0.18;
+const ROLL_TRIM = 0.15;
 
 function makeMaterial(scene: Scene, name: string, color: Color3, options?: { emissive?: Color3; alpha?: number }) {
   const material = new StandardMaterial(name, scene);
@@ -100,6 +110,82 @@ function createMountain(scene: Scene, x: number, y: number, z: number, height: n
   mountain.rotation.y = (x + z) * 0.07;
   mountain.material = material;
   return mountain;
+}
+
+type Vec3 = [number, number, number];
+
+function mirrorX(point: Vec3): Vec3 {
+  return [-point[0], point[1], point[2]];
+}
+
+function mirrorFacet(facet: Vec3[]): Vec3[] {
+  return facet.map(mirrorX).reverse();
+}
+
+function lift(point: Vec3, dy: number): Vec3 {
+  return [point[0], point[1] + dy, point[2]];
+}
+
+function blend(a: Vec3, b: Vec3, t: number): Vec3 {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
+function createFacetMesh(name: string, scene: Scene, facets: Vec3[][], material: StandardMaterial) {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  facets.forEach((facet) => {
+    const base = positions.length / 3;
+    facet.forEach(([x, y, z]) => positions.push(x, y, z));
+    for (let i = 1; i < facet.length - 1; i += 1) indices.push(base, base + i, base + i + 1);
+  });
+  const normals: number[] = [];
+  VertexData.ComputeNormals(positions, indices, normals);
+  const data = new VertexData();
+  data.positions = positions;
+  data.indices = indices;
+  data.normals = normals;
+  const mesh = new Mesh(name, scene);
+  data.applyToMesh(mesh);
+  mesh.material = material;
+  return mesh;
+}
+
+/**
+ * Folded paper dart built from flat facets. The nose sits on +Z, so the model
+ * points down the corridor the plane actually travels along.
+ */
+function createPaperPlane(scene: Scene, paper: StandardMaterial, fold: StandardMaterial, accent: StandardMaterial) {
+  const nose: Vec3 = [0, 0, 1.16];
+  const tail: Vec3 = [0, 0.05, -1.02];
+  const tipL: Vec3 = [-0.94, 0.32, -0.9];
+  const keel: Vec3 = [0, -0.36, -0.86];
+
+  const root = new TransformNode("paper-plane", scene);
+  root.scaling.setAll(PLANE_SCALE);
+
+  const wingFacets: Vec3[][] = [[nose, tail, tipL]];
+  const wings = createFacetMesh("paper-plane-wings", scene, [...wingFacets, ...wingFacets.map(mirrorFacet)], paper);
+  wings.parent = root;
+
+  // Centre keel: the fold you hold when you throw it, hanging below the wings.
+  const keelMesh = createFacetMesh("paper-plane-keel", scene, [[nose, keel, tail]], fold);
+  keelMesh.parent = root;
+
+  // Inner folds and nose tip float a hair above the wing so the creases read at
+  // a distance without z-fighting.
+  const foldFacets: Vec3[][] = [[lift(nose, 0.02), lift(tail, 0.02), lift(blend(tipL, tail, 0.58), 0.02)]];
+  const folds = createFacetMesh("paper-plane-folds", scene, [...foldFacets, ...foldFacets.map(mirrorFacet)], fold);
+  folds.parent = root;
+
+  const tipFacets: Vec3[][] = [[
+    lift(nose, 0.026),
+    lift(blend(nose, tail, 0.19), 0.026),
+    lift(blend(nose, tipL, 0.21), 0.026),
+  ]];
+  const tips = createFacetMesh("paper-plane-tip", scene, [...tipFacets, ...tipFacets.map(mirrorFacet)], accent);
+  tips.parent = root;
+
+  return root;
 }
 
 function makeGate(scene: Scene, z: number, gapY: number, cream: StandardMaterial, coral: StandardMaterial): Gate {
@@ -168,6 +254,13 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
   const mountainLightMaterial = makeMaterial(scene, "island-light", new Color3(0.16, 0.64, 0.63));
   const beaconMaterial = makeMaterial(scene, "finish-beacon", new Color3(0.95, 0.92, 0.74), { emissive: new Color3(0.95, 0.42, 0.08) });
   const cyanMaterial = makeMaterial(scene, "finish-cyan", new Color3(0.24, 0.95, 1), { emissive: new Color3(0.04, 0.35, 0.4) });
+  const paperMaterial = makeMaterial(scene, "paper-white", new Color3(0.97, 0.98, 1), { emissive: new Color3(0.3, 0.34, 0.4) });
+  const paperFoldMaterial = makeMaterial(scene, "paper-fold", new Color3(0.11, 0.46, 0.86), { emissive: new Color3(0.03, 0.12, 0.24) });
+  const paperTipMaterial = makeMaterial(scene, "paper-tip", new Color3(0.95, 0.31, 0.22), { emissive: new Color3(0.2, 0.05, 0.03) });
+  [paperMaterial, paperFoldMaterial, paperTipMaterial].forEach((material) => {
+    material.backFaceCulling = false;
+    material.twoSidedLighting = true;
+  });
 
   const water = MeshBuilder.CreateGround("endless-water", { width: 240, height: 480 }, scene);
   water.position.y = 0;
@@ -195,17 +288,9 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
   createCloud(scene, -28, 13.2, 116, 2.1, cloudMaterial);
   createCloud(scene, 27, 12.1, 145, 1.6, cloudMaterial);
 
-  const plane = MeshBuilder.CreatePlane("paper-plane", { width: 4.35, height: 3.2, sideOrientation: Mesh.DOUBLESIDE }, scene);
-  plane.position.set(0, 4.35, 0.65);
-  plane.rotation.x = -0.13;
-  const planeMaterial = new StandardMaterial("paper-plane-art", scene);
-  const planeTexture = new Texture(PLAYER_TEXTURE, scene, true, false);
-  planeTexture.hasAlpha = true;
-  planeMaterial.diffuseTexture = planeTexture;
-  planeMaterial.useAlphaFromDiffuseTexture = true;
-  planeMaterial.backFaceCulling = false;
-  planeMaterial.emissiveColor = new Color3(0.12, 0.18, 0.25);
-  plane.material = planeMaterial;
+  const plane = createPaperPlane(scene, paperMaterial, paperFoldMaterial, paperTipMaterial);
+  plane.position.set(0, PLANE_START_Y, 0.65);
+  plane.rotation.set(PITCH_TRIM, YAW_TRIM, ROLL_TRIM);
 
   const planeShadow = MeshBuilder.CreateDisc("plane-shadow", { radius: 0.85, tessellation: 24 }, scene);
   planeShadow.rotation.x = Math.PI / 2;
@@ -264,8 +349,8 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
     elapsed = 0;
     distance = 0;
     score = 0;
-    plane.position.set(0, 4.35, 0.65);
-    plane.rotation.x = -0.13;
+    plane.position.set(0, PLANE_START_Y, 0.65);
+    plane.rotation.set(PITCH_TRIM, YAW_TRIM, ROLL_TRIM);
     portalRoot.position.z = 335;
     gates.forEach((gate, index) => {
       gate.root.position.z = START_Z + index * GATE_SPACING;
@@ -331,7 +416,11 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
 
       velocityY += GRAVITY * dt;
       plane.position.y += velocityY * dt;
-      plane.rotation.x = -0.13 + Math.max(-0.24, Math.min(0.26, velocityY * 0.028));
+      // Negative rotation.x lifts the nose in Babylon's left-handed frame, so the
+      // model always points along the path it is actually travelling.
+      plane.rotation.x = PITCH_TRIM + Math.max(PITCH_UP_LIMIT, Math.min(PITCH_DOWN_LIMIT, -velocityY * PITCH_PER_SPEED));
+      plane.rotation.y = YAW_TRIM + Math.sin(elapsed * 0.8) * 0.05;
+      plane.rotation.z = ROLL_TRIM + Math.sin(elapsed * 1.5) * 0.07;
       planeShadow.scaling.x = 1 + (plane.position.y - 1.2) * 0.04;
       planeShadow.scaling.y = 1 + (plane.position.y - 1.2) * 0.04;
       distance += FLIGHT_SPEED * dt;
@@ -370,8 +459,8 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
         score += 500;
         window.localStorage.setItem("paper-plane-best", String(best));
       }
-      camera.position.y += (5.1 + (plane.position.y - 4.35) * 0.22 - camera.position.y) * Math.min(1, dt * 4);
-      camera.setTarget(new Vector3(0, 4.05 + (plane.position.y - 4.35) * 0.1, 28));
+      camera.position.y += (5.1 + (plane.position.y - PLANE_START_Y) * 0.22 - camera.position.y) * Math.min(1, dt * 4);
+      camera.setTarget(new Vector3(0, 4.05 + (plane.position.y - PLANE_START_Y) * 0.1, 28));
     }
 
     ribbons.forEach(({ mesh, speed }) => {
