@@ -54,6 +54,7 @@ const PITCH_TRIM = 0.2;
 const PITCH_PER_SPEED = 0.052;
 const PITCH_UP_LIMIT = -0.24;
 const PITCH_DOWN_LIMIT = 0.3;
+const CRASH_FLOOR = 0.55;
 const YAW_TRIM = 0.18;
 const ROLL_TRIM = 0.15;
 
@@ -292,11 +293,20 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
   plane.position.set(0, PLANE_START_Y, 0.65);
   plane.rotation.set(PITCH_TRIM, YAW_TRIM, ROLL_TRIM);
 
-  const planeShadow = MeshBuilder.CreateDisc("plane-shadow", { radius: 0.85, tessellation: 24 }, scene);
+  const planeShadow = MeshBuilder.CreateDisc("plane-shadow", { radius: 1.15, tessellation: 24 }, scene);
   planeShadow.rotation.x = Math.PI / 2;
   planeShadow.position.set(0, 0.22, 0.65);
-  const shadowMaterial = makeMaterial(scene, "plane-shadow-mat", new Color3(0.02, 0.18, 0.24), { alpha: 0.26 });
+  const shadowMaterial = makeMaterial(scene, "plane-shadow-mat", new Color3(0.02, 0.18, 0.24), { alpha: 0.3 });
   planeShadow.material = shadowMaterial;
+
+  const updateShadow = () => {
+    // Higher plane, smaller and fainter shadow on the water below it.
+    const lift = Math.min(1, Math.max(0, (plane.position.y - 0.9) / 9.5));
+    const spread = 1 - lift * 0.45;
+    planeShadow.scaling.x = spread;
+    planeShadow.scaling.y = spread;
+    shadowMaterial.alpha = 0.3 - lift * 0.21;
+  };
 
   const gates: Gate[] = [];
   const gapPattern = [4.8, 5.9, 4.5, 6.15, 5.1, 4.35, 5.75, 4.6, 6.0, 4.8, 5.45];
@@ -330,9 +340,17 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
   let elapsed = 0;
   let distance = 0;
   let score = 0;
-  let best = Number(window.localStorage.getItem("paper-plane-best") || 0);
+  const storedBest = Number(window.localStorage.getItem("paper-plane-best"));
+  let best = Number.isFinite(storedBest) && storedBest > 0 ? Math.floor(storedBest) : 0;
   let flapCooldown = 0;
   let disposed = false;
+  let hudTimer = 0;
+  let hudPhase: GamePhase | null = null;
+
+  // The HUD is DOM, so every publish costs a React render. Fifteen updates a
+  // second is plenty for a score readout and keeps the render loop free on
+  // tablets; a phase change always goes out immediately.
+  const HUD_INTERVAL = 1 / 15;
 
   const snapshot = (): GameSnapshot => ({
     phase,
@@ -343,6 +361,18 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
     best,
   });
 
+  const publishNow = () => {
+    hudTimer = 0;
+    hudPhase = phase;
+    publish(snapshot());
+  };
+
+  const endRun = (bonus = 0) => {
+    score += bonus;
+    best = Math.max(best, score);
+    window.localStorage.setItem("paper-plane-best", String(best));
+  };
+
   const reset = () => {
     phase = "ready";
     velocityY = 0;
@@ -351,12 +381,13 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
     score = 0;
     plane.position.set(0, PLANE_START_Y, 0.65);
     plane.rotation.set(PITCH_TRIM, YAW_TRIM, ROLL_TRIM);
+    updateShadow();
     portalRoot.position.z = 335;
     gates.forEach((gate, index) => {
       gate.root.position.z = START_Z + index * GATE_SPACING;
       gate.passed = false;
     });
-    publish(snapshot());
+    publishNow();
   };
 
   const rise = () => {
@@ -369,7 +400,7 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
     }
     velocityY = Math.min(FLAP_VELOCITY, velocityY + 4.6);
     flapCooldown = 0.28;
-    publish(snapshot());
+    publishNow();
   };
 
   const onPointerDown = (event: PointerEvent) => {
@@ -421,8 +452,7 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
       plane.rotation.x = PITCH_TRIM + Math.max(PITCH_UP_LIMIT, Math.min(PITCH_DOWN_LIMIT, -velocityY * PITCH_PER_SPEED));
       plane.rotation.y = YAW_TRIM + Math.sin(elapsed * 0.8) * 0.05;
       plane.rotation.z = ROLL_TRIM + Math.sin(elapsed * 1.5) * 0.07;
-      planeShadow.scaling.x = 1 + (plane.position.y - 1.2) * 0.04;
-      planeShadow.scaling.y = 1 + (plane.position.y - 1.2) * 0.04;
+      updateShadow();
       distance += FLIGHT_SPEED * dt;
       score = Math.floor(distance * 12.5);
 
@@ -440,27 +470,32 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
         const withinGap = Math.abs(plane.position.y - gate.gapY) < gate.gapHeight / 2 - PLANE_RADIUS * 0.32;
         if (inGate && !withinGap) {
           phase = "gameover";
-          best = Math.max(best, score);
-          window.localStorage.setItem("paper-plane-best", String(best));
+          endRun();
         }
       });
 
       if (plane.position.y < 0.92 || plane.position.y > 11.25) {
         phase = "gameover";
-        best = Math.max(best, score);
-        window.localStorage.setItem("paper-plane-best", String(best));
+        endRun();
       }
 
       portalRoot.position.z -= FLIGHT_SPEED * dt;
       portalRoot.rotation.y = Math.sin(elapsed * 1.7) * 0.035;
       if (distance >= FINISH_DISTANCE || portalRoot.position.z < 1.6) {
         phase = "won";
-        best = Math.max(best, score + 500);
-        score += 500;
-        window.localStorage.setItem("paper-plane-best", String(best));
+        endRun(500);
       }
       camera.position.y += (5.1 + (plane.position.y - PLANE_START_Y) * 0.22 - camera.position.y) * Math.min(1, dt * 4);
       camera.setTarget(new Vector3(0, 4.05 + (plane.position.y - PLANE_START_Y) * 0.1, 28));
+    }
+
+    if (phase === "gameover" && plane.position.y > CRASH_FLOOR) {
+      // Tumble down to the water instead of hanging where the run ended.
+      velocityY += GRAVITY * 1.5 * dt;
+      plane.position.y = Math.max(CRASH_FLOOR, plane.position.y + velocityY * dt);
+      plane.rotation.x += dt * 2.6;
+      plane.rotation.z += dt * 1.9;
+      updateShadow();
     }
 
     ribbons.forEach(({ mesh, speed }) => {
@@ -468,7 +503,8 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
       if (mesh.position.z < -18) mesh.position.z += 168;
     });
 
-    publish(snapshot());
+    hudTimer += dt;
+    if (phase !== hudPhase || hudTimer >= HUD_INTERVAL) publishNow();
   };
 
   const observer = scene.onBeforeRenderObservable.add(update);
