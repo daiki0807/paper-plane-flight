@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Engine } from "@babylonjs/core/Engines/engine";
-import { createGameScene, type GameHandle, type GameSnapshot } from "@/game/scene";
+import { createGameScene, LEVEL_OPTIONS, type GameHandle, type GameSnapshot, type Level } from "@/game/scene";
 
 const initialSnapshot: GameSnapshot = {
   phase: "ready",
+  level: 1,
+  levelLabel: LEVEL_OPTIONS[0].label,
   score: 0,
   distance: 0,
   altitude: 4.35,
@@ -15,7 +17,7 @@ function formatScore(value: number) {
   return value.toLocaleString("ja-JP").padStart(5, "0");
 }
 
-function dispatchAction(action: "rise" | "restart") {
+function dispatchAction(action: "rise" | "restart" | `level:${Level}`) {
   window.dispatchEvent(new CustomEvent("paper-plane-action", { detail: action }));
 }
 
@@ -77,7 +79,10 @@ export default function GameCanvas() {
               <h1>かみひこうき</h1>
             </div>
           </div>
-          <div className="flight-status"><span className={`status-dot ${snapshot.phase}`} />{phaseLabel}</div>
+          <div className="status-stack">
+            <div className="level-badge">レベル{snapshot.level}・{snapshot.levelLabel}</div>
+            <div className="flight-status"><span className={`status-dot ${snapshot.phase}`} />{phaseLabel}</div>
+          </div>
         </header>
 
         <section className="metrics-row">
@@ -100,9 +105,29 @@ export default function GameCanvas() {
         </div>
 
         <div className="bottom-panel">
-          {snapshot.phase === "ready" && <button className="rise-button" onClick={() => dispatchAction("rise")}><span className="tap-orb">↑</span><span><b>タップで うかぶ</b><small>スペースキーでも OK</small></span></button>}
+          {snapshot.phase === "ready" && (
+            <div className="ready-panel">
+              <div className="level-picker">
+                <span className="metric-label">コースを えらぶ</span>
+                <div className="level-buttons">
+                  {LEVEL_OPTIONS.map(({ level, label }) => (
+                    <button
+                      key={level}
+                      className={`level-button${level === snapshot.level ? " active" : ""}`}
+                      aria-pressed={level === snapshot.level}
+                      onClick={() => dispatchAction(`level:${level}`)}
+                    >
+                      <b>レベル{level}</b>
+                      <small>{label}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button className="rise-button" onClick={() => dispatchAction("rise")}><span className="tap-orb">↑</span><span><b>タップで うかぶ</b><small>スペースキーでも OK</small></span></button>
+            </div>
+          )}
           {snapshot.phase === "playing" && <button className="rise-button compact" onClick={() => dispatchAction("rise")}><span className="tap-orb">↑</span><span><b>うかぶ</b><small>タップ / スペース</small></span></button>}
-          {isTerminal && <div className="result-card"><div className="result-kicker">{snapshot.phase === "won" ? "ゴール とうちゃく" : "つばさが こわれた"}</div><h2>{snapshot.phase === "won" ? "みごとな ひこう！" : "こんかいは ざんねん。"}</h2><p>{snapshot.phase === "won" ? "かべを ぜんぶ よけて、ゴールまで とべたね。" : "もういちど。すきまの 高さに あわせて タップしよう。"}</p><button className="replay-button" onClick={() => dispatchAction("restart")}>もういちど <span>↻</span></button></div>}
+          {isTerminal && <div className="result-card"><div className="result-kicker">{snapshot.phase === "won" ? "ゴール とうちゃく" : "つばさが こわれた"}</div><h2>{snapshot.phase === "won" ? "みごとな ひこう！" : "こんかいは ざんねん。"}</h2><p>{snapshot.phase === "won" ? "かべを ぜんぶ よけて、ゴールまで とべたね。" : "もういちど。すきまの 高さに あわせて タップしよう。"}</p><button className="replay-button" onClick={() => dispatchAction("restart")}>もういちど <span>↻</span></button><p className="result-foot">コースを かえるときも「もういちど」</p></div>}
           {!isTerminal && <div className="control-hint"><span className="hint-key">スペース</span><span>がめんの どこでも タップで うかぶ</span></div>}
         </div>
 

@@ -13,8 +13,12 @@ import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 
 export type GamePhase = "ready" | "playing" | "gameover" | "won";
 
+export type Level = 1 | 2 | 3;
+
 export type GameSnapshot = {
   phase: GamePhase;
+  level: Level;
+  levelLabel: string;
   score: number;
   distance: number;
   altitude: number;
@@ -40,11 +44,16 @@ type Ribbon = { mesh: Mesh; speed: number };
 const FINISH_DISTANCE = 320;
 const START_Z = 28;
 const GATE_SPACING = 27;
-const GATE_COUNT = 11;
 const GRAVITY = -7.2;
 const FLAP_VELOCITY = 6.8;
-const FLIGHT_SPEED = 16.5;
-const PLANE_RADIUS = 0.78;
+/**
+ * How much of the plane the gap has to clear. The mesh reaches 0.59 above and
+ * 0.67 below its origin, so half a metre is the honest number here: it keeps
+ * the hit box tied to what the player can see, which matters once the gaps
+ * differ between levels — a fixed slack would quietly turn into a big fraction
+ * of level 3's narrow gap.
+ */
+const PLANE_HALF_HEIGHT = 0.5;
 const PLANE_START_Y = 4.35;
 const PLANE_SCALE = 1.85;
 // A paper dart glides slightly nose-down, and the chase camera sits almost level
@@ -57,6 +66,65 @@ const PITCH_DOWN_LIMIT = 0.3;
 const CRASH_FLOOR = 0.55;
 const YAW_TRIM = 0.18;
 const ROLL_TRIM = 0.15;
+
+type LevelConfig = {
+  label: string;
+  gapHeight: number;
+  gapPattern: number[];
+  flightSpeed: number;
+  scoreMultiplier: number;
+};
+
+/**
+ * Three hand-tuned courses rather than a difficulty curve, so a player can pick
+ * the one that suits them and stay there. Each level widens or narrows the gap,
+ * spreads the gaps further apart vertically, and changes how fast the corridor
+ * arrives; the course length and gate spacing stay put so scores stay
+ * comparable. `gapHeight` is the visible opening, and the hit box takes
+ * `PLANE_HALF_HEIGHT` off each side of it — level 2 is set so that its usable
+ * opening matches the single course this replaces.
+ */
+const LEVELS: Record<Level, LevelConfig> = {
+  1: {
+    label: "やさしい",
+    gapHeight: 5,
+    gapPattern: [5, 5.6, 5, 5.7, 5.2, 5.5, 5, 5.6, 5.2, 5.4, 5.1],
+    flightSpeed: 14,
+    scoreMultiplier: 1,
+  },
+  2: {
+    label: "ふつう",
+    gapHeight: 4.2,
+    gapPattern: [4.8, 5.9, 4.5, 6.15, 5.1, 4.35, 5.75, 4.6, 6, 4.8, 5.45],
+    flightSpeed: 16.5,
+    scoreMultiplier: 1.5,
+  },
+  3: {
+    label: "むずかしい",
+    gapHeight: 3,
+    gapPattern: [4.4, 3.5, 6.6, 3.6, 6.8, 4, 6.5, 3.4, 6.4, 3.8, 6],
+    flightSpeed: 20.5,
+    scoreMultiplier: 2,
+  },
+};
+
+const LEVEL_KEYS: Level[] = [1, 2, 3];
+
+/** What the level picker in the HUD renders, so the labels live in one place. */
+export const LEVEL_OPTIONS = LEVEL_KEYS.map((level) => ({ level, label: LEVELS[level].label }));
+
+function isLevel(value: number): value is Level {
+  return value === 1 || value === 2 || value === 3;
+}
+
+function bestKey(level: Level) {
+  return `paper-plane-best-l${level}`;
+}
+
+function readBest(level: Level) {
+  const raw = Number(window.localStorage.getItem(bestKey(level)));
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+}
 
 function makeMaterial(scene: Scene, name: string, color: Color3, options?: { emissive?: Color3; alpha?: number }) {
   const material = new StandardMaterial(name, scene);
@@ -189,12 +257,11 @@ function createPaperPlane(scene: Scene, paper: StandardMaterial, fold: StandardM
   return root;
 }
 
-function makeGate(scene: Scene, z: number, gapY: number, cream: StandardMaterial, coral: StandardMaterial): Gate {
+function makeGate(scene: Scene, z: number, gapY: number, gapHeight: number, cream: StandardMaterial, coral: StandardMaterial): Gate {
   const root = new TransformNode(`gate-${z}`, scene);
   const gateWidth = 8.8;
   const corridorBottom = 0.45;
   const corridorTop = 11.7;
-  const gapHeight = 3.7;
   const bottomHeight = Math.max(1.2, gapY - gapHeight / 2 - corridorBottom);
   const topHeight = Math.max(1.2, corridorTop - (gapY + gapHeight / 2));
 
@@ -308,11 +375,24 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
     shadowMaterial.alpha = 0.3 - lift * 0.21;
   };
 
-  const gates: Gate[] = [];
-  const gapPattern = [4.8, 5.9, 4.5, 6.15, 5.1, 4.35, 5.75, 4.6, 6.0, 4.8, 5.45];
-  for (let i = 0; i < GATE_COUNT; i += 1) {
-    gates.push(makeGate(scene, START_Z + i * GATE_SPACING, gapPattern[i], creamMaterial, coralMaterial));
-  }
+  const query = new URLSearchParams(window.location.search);
+  const demo = query.has("demo");
+  const requestedLevel = Number(query.get("level"));
+  const storedLevel = Number(window.localStorage.getItem("paper-plane-level"));
+  let level: Level = isLevel(requestedLevel)
+    ? requestedLevel
+    : demo || !isLevel(storedLevel)
+      ? 1
+      : storedLevel;
+  let config = LEVELS[level];
+  let flightSpeed = config.flightSpeed;
+
+  let gates: Gate[] = [];
+  const buildGates = () => {
+    gates.forEach((gate) => gate.root.dispose());
+    gates = config.gapPattern.map((gapY, index) =>
+      makeGate(scene, START_Z + index * GATE_SPACING, gapY, config.gapHeight, creamMaterial, coralMaterial));
+  };
 
   const portalRoot = new TransformNode("finish-portal", scene);
   portalRoot.position.set(0, 4.5, 335);
@@ -334,14 +414,12 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
     check.parent = portalRoot;
   }
 
-  const demo = new URLSearchParams(window.location.search).has("demo");
   let phase: GamePhase = "ready";
   let velocityY = 0;
   let elapsed = 0;
   let distance = 0;
   let score = 0;
-  const storedBest = Number(window.localStorage.getItem("paper-plane-best"));
-  let best = Number.isFinite(storedBest) && storedBest > 0 ? Math.floor(storedBest) : 0;
+  let best = readBest(level);
   let flapCooldown = 0;
   let disposed = false;
   let hudTimer = 0;
@@ -354,6 +432,8 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
 
   const snapshot = (): GameSnapshot => ({
     phase,
+    level,
+    levelLabel: config.label,
     score,
     distance,
     altitude: plane.position.y,
@@ -368,9 +448,9 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
   };
 
   const endRun = (bonus = 0) => {
-    score += bonus;
+    score += Math.round(bonus * config.scoreMultiplier);
     best = Math.max(best, score);
-    window.localStorage.setItem("paper-plane-best", String(best));
+    window.localStorage.setItem(bestKey(level), String(best));
   };
 
   const reset = () => {
@@ -388,6 +468,17 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
       gate.passed = false;
     });
     publishNow();
+  };
+
+  const setLevel = (next: Level) => {
+    if (next === level) return;
+    level = next;
+    config = LEVELS[level];
+    flightSpeed = config.flightSpeed;
+    best = readBest(level);
+    window.localStorage.setItem("paper-plane-level", String(level));
+    buildGates();
+    reset();
   };
 
   const rise = () => {
@@ -420,11 +511,14 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
     const action = (event as CustomEvent<string>).detail;
     if (action === "rise") rise();
     if (action === "restart") reset();
+    const picked = action.startsWith("level:") ? Number(action.slice(6)) : NaN;
+    if (isLevel(picked)) setLevel(picked);
   };
   canvas.addEventListener("pointerdown", onPointerDown, { passive: false });
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("paper-plane-action", onAction);
 
+  buildGates();
   reset();
 
   const update = () => {
@@ -453,21 +547,21 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
       plane.rotation.y = YAW_TRIM + Math.sin(elapsed * 0.8) * 0.05;
       plane.rotation.z = ROLL_TRIM + Math.sin(elapsed * 1.5) * 0.07;
       updateShadow();
-      distance += FLIGHT_SPEED * dt;
-      score = Math.floor(distance * 12.5);
+      distance += flightSpeed * dt;
+      score = Math.floor(distance * 12.5 * config.scoreMultiplier);
 
       gates.forEach((gate) => {
-        gate.root.position.z -= FLIGHT_SPEED * dt;
+        gate.root.position.z -= flightSpeed * dt;
         if (!gate.passed && gate.root.position.z < -1.3) {
           gate.passed = true;
-          score += 150;
+          score += Math.round(150 * config.scoreMultiplier);
         }
         if (gate.root.position.z < -22) {
-          gate.root.position.z += GATE_COUNT * GATE_SPACING;
+          gate.root.position.z += gates.length * GATE_SPACING;
           gate.passed = false;
         }
         const inGate = gate.root.position.z > -1.25 && gate.root.position.z < 1.25;
-        const withinGap = Math.abs(plane.position.y - gate.gapY) < gate.gapHeight / 2 - PLANE_RADIUS * 0.32;
+        const withinGap = Math.abs(plane.position.y - gate.gapY) < gate.gapHeight / 2 - PLANE_HALF_HEIGHT;
         if (inGate && !withinGap) {
           phase = "gameover";
           endRun();
@@ -479,7 +573,7 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
         endRun();
       }
 
-      portalRoot.position.z -= FLIGHT_SPEED * dt;
+      portalRoot.position.z -= flightSpeed * dt;
       portalRoot.rotation.y = Math.sin(elapsed * 1.7) * 0.035;
       if (distance >= FINISH_DISTANCE || portalRoot.position.z < 1.6) {
         phase = "won";
@@ -499,7 +593,7 @@ export async function createGameScene(engine: Engine, canvas: HTMLCanvasElement)
     }
 
     ribbons.forEach(({ mesh, speed }) => {
-      mesh.position.z -= FLIGHT_SPEED * dt * speed;
+      mesh.position.z -= flightSpeed * dt * speed;
       if (mesh.position.z < -18) mesh.position.z += 168;
     });
 
