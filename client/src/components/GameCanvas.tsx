@@ -12,7 +12,7 @@ const initialSnapshot: GameSnapshot = {
 };
 
 function formatScore(value: number) {
-  return value.toLocaleString("en-US").padStart(5, "0");
+  return value.toLocaleString("ja-JP").padStart(5, "0");
 }
 
 function dispatchAction(action: "rise" | "restart") {
@@ -62,7 +62,7 @@ export default function GameCanvas() {
     };
   }, []);
 
-  const phaseLabel = snapshot.phase === "ready" ? "FLIGHT READY" : snapshot.phase === "playing" ? "IN FLIGHT" : snapshot.phase === "won" ? "CLEARED" : "IMPACT";
+  const phaseLabel = snapshot.phase === "ready" ? "じゅんび かんりょう" : snapshot.phase === "playing" ? "ひこう中" : snapshot.phase === "won" ? "ゴール とうちゃく" : "ついらく";
   const isTerminal = snapshot.phase === "gameover" || snapshot.phase === "won";
 
   return (
@@ -73,8 +73,8 @@ export default function GameCanvas() {
           <div className="brand-lockup">
             <div className="brand-mark">↗</div>
             <div>
-              <p className="eyebrow">SKYWAY / 01</p>
-              <h1>PAPER PLANE</h1>
+              <p className="eyebrow">そらの かいろう 01</p>
+              <h1>かみひこうき</h1>
             </div>
           </div>
           <div className="flight-status"><span className={`status-dot ${snapshot.phase}`} />{phaseLabel}</div>
@@ -82,31 +82,31 @@ export default function GameCanvas() {
 
         <section className="metrics-row">
           <div className="metric-card score-card">
-            <span className="metric-label">SCORE</span>
+            <span className="metric-label">スコア</span>
             <strong>{formatScore(snapshot.score)}</strong>
-            <span className="metric-foot">BEST {formatScore(snapshot.best)}</span>
+            <span className="metric-foot">ベスト {formatScore(snapshot.best)}</span>
           </div>
           <div className="metric-card distance-card">
-            <div className="distance-heading"><span className="metric-label">DISTANCE TO GOAL</span><strong>{Math.floor(snapshot.distance)}M <em>/ 320M</em></strong></div>
+            <div className="distance-heading"><span className="metric-label">ゴールまでの きょり</span><strong>{Math.floor(snapshot.distance)}m <em>/ 320m</em></strong></div>
             <div className="progress-track"><div className="progress-fill" style={{ width: `${snapshot.progress * 100}%` }} /><div className="plane-tick" style={{ left: `${Math.min(96, snapshot.progress * 100)}%` }}>✈</div></div>
-            <div className="progress-labels"><span>LAUNCH</span><span>CHECKPOINT 03</span><span>FINISH</span></div>
+            <div className="progress-labels"><span>スタート</span><span>ちゅうかん</span><span>ゴール</span></div>
           </div>
-          <div className="metric-card altitude-card"><span className="metric-label">ALTITUDE</span><strong>{snapshot.altitude.toFixed(1)}<em> M</em></strong><div className="altitude-meter"><div style={{ height: `${Math.max(6, Math.min(100, (snapshot.altitude / 11.5) * 100))}%` }} /></div></div>
+          <div className="metric-card altitude-card"><span className="metric-label">たかさ</span><strong>{snapshot.altitude.toFixed(1)}<em> m</em></strong><div className="altitude-meter"><div style={{ height: `${Math.max(6, Math.min(100, (snapshot.altitude / 11.5) * 100))}%` }} /></div></div>
         </section>
 
         <div className="center-copy">
-          <span className="direction-pill">AUTO-PILOT CORRIDOR <span>●</span></span>
-          <p>Thread the gap. Keep your wings above the water.</p>
+          <span className="direction-pill">じどう ぜんしん中 <span>●</span></span>
+          <p>かべの すきまを ねらおう。水に つかないように。</p>
         </div>
 
         <div className="bottom-panel">
-          {snapshot.phase === "ready" && <button className="rise-button" onClick={() => dispatchAction("rise")}><span className="tap-orb">↑</span><span><b>TAP TO RISE</b><small>or press SPACE</small></span></button>}
-          {snapshot.phase === "playing" && <button className="rise-button compact" onClick={() => dispatchAction("rise")}><span className="tap-orb">↑</span><span><b>RISE</b><small>tap / space</small></span></button>}
-          {isTerminal && <div className="result-card"><div className="result-kicker">{snapshot.phase === "won" ? "ROUTE COMPLETE" : "WING DAMAGE DETECTED"}</div><h2>{snapshot.phase === "won" ? "Perfect landing." : "The corridor won this round."}</h2><p>{snapshot.phase === "won" ? "You found the clean line through the skyway." : "Tap replay, then feather your altitude through each opening."}</p><button className="replay-button" onClick={() => dispatchAction("restart")}>REPLAY <span>↻</span></button></div>}
-          {!isTerminal && <div className="control-hint"><span className="hint-key">SPACE</span><span>or tap anywhere to change your trajectory</span></div>}
+          {snapshot.phase === "ready" && <button className="rise-button" onClick={() => dispatchAction("rise")}><span className="tap-orb">↑</span><span><b>タップで うかぶ</b><small>スペースキーでも OK</small></span></button>}
+          {snapshot.phase === "playing" && <button className="rise-button compact" onClick={() => dispatchAction("rise")}><span className="tap-orb">↑</span><span><b>うかぶ</b><small>タップ / スペース</small></span></button>}
+          {isTerminal && <div className="result-card"><div className="result-kicker">{snapshot.phase === "won" ? "ゴール とうちゃく" : "つばさが こわれた"}</div><h2>{snapshot.phase === "won" ? "みごとな ひこう！" : "こんかいは ざんねん。"}</h2><p>{snapshot.phase === "won" ? "かべを ぜんぶ よけて、ゴールまで とべたね。" : "もういちど。すきまの 高さに あわせて タップしよう。"}</p><button className="replay-button" onClick={() => dispatchAction("restart")}>もういちど <span>↻</span></button></div>}
+          {!isTerminal && <div className="control-hint"><span className="hint-key">スペース</span><span>がめんの どこでも タップで うかぶ</span></div>}
         </div>
 
-        <footer className="footer-note"><span>FLIGHT SYSTEMS ONLINE</span><span>AVOID THE WALLS · REACH THE LIGHT</span></footer>
+        <footer className="footer-note"><span>そうさ：タップ / スペース</span><span>かべを よけて ゴールへ</span></footer>
       </div>
     </main>
   );
